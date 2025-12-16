@@ -16,17 +16,19 @@ import {
   MCPAuthenticationType,
   MCPAuthenticationPerformer,
 } from "@/lib/tools/interfaces";
-import { useAgentsContext } from "@/refresh-components/contexts/AgentsContext";
+import { useForcedTools } from "@/lib/hooks/useForcedTools";
+import { useAssistantPreferences } from "@/app/chat/hooks/useAssistantPreferences";
 import { useUser } from "@/components/user/UserProvider";
 import { FilterManager, useSourcePreferences } from "@/lib/hooks";
 import { listSourceMetadata } from "@/lib/sources";
 import SvgChevronRight from "@/icons/chevron-right";
 import SvgKey from "@/icons/key";
-import { MCPApiKeyModal } from "@/components/chat/MCPApiKeyModal";
+import MCPApiKeyModal from "@/components/chat/MCPApiKeyModal";
 import { ValidSources } from "@/lib/types";
 import { SourceMetadata } from "@/lib/search/interfaces";
 import { SourceIcon } from "@/components/SourceIcon";
-import { useChatContext } from "@/refresh-components/contexts/ChatContext";
+import { useAvailableTools } from "@/lib/hooks/useAvailableTools";
+import { useCCPairs } from "@/lib/hooks/useCCPairs";
 import IconButton from "@/refresh-components/buttons/IconButton";
 import SvgSliders from "@/icons/sliders";
 import InputTypeIn from "@/refresh-components/inputs/InputTypeIn";
@@ -135,20 +137,18 @@ export default function ActionsPopover({
   });
 
   // Get the assistant preference for this assistant
-  const {
-    agentPreferences: assistantPreferences,
-    setSpecificAgentPreferences: setSpecificAssistantPreferences,
-    forcedToolIds,
-    setForcedToolIds,
-  } = useAgentsContext();
+  const { assistantPreferences, setSpecificAssistantPreferences } =
+    useAssistantPreferences();
+  const { forcedToolIds, setForcedToolIds } = useForcedTools();
 
   const { user, isAdmin, isCurator } = useUser();
 
-  const { availableTools, ccPairs } = useChatContext();
+  const { tools: availableTools } = useAvailableTools();
+  const { ccPairs } = useCCPairs();
   const availableToolIds = availableTools.map((tool) => tool.id);
 
   // Check if there are any connectors available
-  const hasNoConnectors = ccPairs.length === 0;
+  const hasNoConnectors = !ccPairs || ccPairs.length === 0;
 
   const assistantPreference = assistantPreferences?.[selectedAssistant.id];
   const disabledToolIds = assistantPreference?.disabled_tool_ids || [];
@@ -179,9 +179,13 @@ export default function ActionsPopover({
   // Filter out MCP tools from the main list (they have mcp_server_id)
   // and filter out tools that are not available
   // Also filter out internal search tool for basic users when there are no connectors
+  // Also filter out tools that are not chat-selectable (e.g., OpenURL)
   const displayTools = selectedAssistant.tools.filter((tool) => {
     // Filter out MCP tools
     if (tool.mcp_server_id) return false;
+
+    // Filter out tools that are not chat-selectable (visibility set by backend)
+    if (!tool.chat_selectable) return false;
 
     // Advertise to admin/curator users that they can connect an internal search tool
     // even if it's not available or has no connectors

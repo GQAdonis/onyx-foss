@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -11,8 +12,6 @@ from onyx.chat.emitter import Emitter
 from onyx.configs.chat_configs import MAX_CHUNKS_FED_TO_CHAT
 from onyx.configs.chat_configs import NUM_RETURNED_HITS
 from onyx.configs.constants import MessageType
-from onyx.context.search.enums import SearchType
-from onyx.context.search.models import IndexFilters
 from onyx.context.search.models import SearchDoc
 from onyx.context.search.models import SearchDocsResponse
 from onyx.server.query_and_chat.streaming_models import GeneratedImage
@@ -91,12 +90,6 @@ class DynamicSchemaInfo(BaseModel):
     message_id: int | None
 
 
-class SearchQueryInfo(BaseModel):
-    predicted_search: SearchType | None
-    final_filters: IndexFilters
-    recency_bias_multiplier: float
-
-
 class WebSearchToolOverrideKwargs(BaseModel):
     # To know what citation number to start at for constructing the string to the LLM
     starting_citation_num: int
@@ -113,10 +106,15 @@ class SearchToolOverrideKwargs(BaseModel):
     # To know what citation number to start at for constructing the string to the LLM
     starting_citation_num: int
     # This is needed because the LLM won't be able to do a really detailed semantic query well
+    # without help and a specific custom prompt for this
     original_query: str | None = None
     message_history: list[ChatMinimalTextMessage] | None = None
     memories: list[str] | None = None
     user_info: str | None = None
+
+    # Used for tool calls after the first one but in the same chat turn. The reason for this is that if the initial pass through
+    # the custom flow did not yield good results, we don't want to go through it again. In that case, we defer entirely to the LLM
+    skip_query_expansion: bool = False
 
     # Number of results to return in the richer object format so that it can be rendered in the UI
     num_hits: int | None = NUM_RETURNED_HITS
@@ -124,6 +122,21 @@ class SearchToolOverrideKwargs(BaseModel):
     max_llm_chunks: int | None = MAX_CHUNKS_FED_TO_CHAT
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class ChatFile(BaseModel):
+    """File from a chat session that can be passed to tools."""
+
+    filename: str
+    content: bytes
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class PythonToolOverrideKwargs(BaseModel):
+    """Override kwargs for the Python/Code Interpreter tool."""
+
+    chat_files: list[ChatFile] = []
 
 
 class SearchToolRunContext(BaseModel):
@@ -159,3 +172,56 @@ class ToolCallInfo(BaseModel):
 
 CHAT_SESSION_ID_PLACEHOLDER = "CHAT_SESSION_ID"
 MESSAGE_ID_PLACEHOLDER = "MESSAGE_ID"
+
+
+class BaseCiteableToolResult(BaseModel):
+    """Base class for tool results that can be cited."""
+
+    document_citation_number: int
+    unique_identifier_to_strip_away: str | None = None
+    type: str
+
+
+class LlmInternalSearchResult(BaseCiteableToolResult):
+    """Result from an internal search query"""
+
+    type: Literal["internal_search"] = "internal_search"
+    title: str
+    excerpt: str
+    metadata: dict[str, Any]
+
+
+class LlmWebSearchResult(BaseCiteableToolResult):
+    """Result from a web search query"""
+
+    type: Literal["web_search"] = "web_search"
+    url: str
+    title: str
+    snippet: str
+
+
+class LlmOpenUrlResult(BaseCiteableToolResult):
+    """Result from opening/fetching a URL"""
+
+    type: Literal["open_url"] = "open_url"
+    content: str
+
+
+class PythonExecutionFile(BaseModel):
+    """File generated during Python execution"""
+
+    filename: str
+    file_link: str
+
+
+class LlmPythonExecutionResult(BaseModel):
+    """Result from Python code execution"""
+
+    type: Literal["python_execution"] = "python_execution"
+
+    stdout: str
+    stderr: str
+    exit_code: int | None
+    timed_out: bool
+    generated_files: list[PythonExecutionFile]
+    error: str | None = None

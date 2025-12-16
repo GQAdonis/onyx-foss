@@ -10,6 +10,11 @@ export enum AuthType {
 export const HOST_URL = process.env.WEB_DOMAIN || "http://127.0.0.1:3000";
 
 export const INTERNAL_URL = process.env.INTERNAL_URL || "http://127.0.0.1:8080";
+
+// Documentation URLs
+export const DOCS_BASE_URL = "https://docs.onyx.app";
+export const DOCS_ADMINS_PATH = `${DOCS_BASE_URL}/admins`;
+
 export const MCP_INTERNAL_URL =
   process.env.MCP_INTERNAL_URL || "http://127.0.0.1:8090";
 
@@ -94,19 +99,8 @@ export const NEXT_PUBLIC_INCLUDE_ERROR_POPUP_SUPPORT_LINK =
 export const NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
 
-// Add support for custom URL protocols in markdown links
-export const ALLOWED_URL_PROTOCOLS = [
-  "http:",
-  "https:",
-  "mailto:",
-  "tel:",
-  "slack:",
-  "vscode:",
-  "file:",
-  "sms:",
-  "spotify:",
-  "zoommtg:",
-];
+// Restrict markdown links to safe protocols
+export const ALLOWED_URL_PROTOCOLS = ["http:", "https:", "mailto:"] as const;
 
 export const MAX_CHARACTERS_PERSONA_DESCRIPTION = 5000000;
 export const MAX_STARTER_MESSAGES = 4;
@@ -135,3 +129,7 @@ export const MAX_FILES_TO_SHOW = 3;
 
 // SIZES
 export const MOBILE_SIDEBAR_BREAKPOINT_PX = 640;
+export const DEFAULT_AGENT_AVATAR_SIZE_PX = 18;
+export const HORIZON_DISTANCE_PX = 800;
+export const LOGO_FOLDED_SIZE_PX = 24;
+export const LOGO_UNFOLDED_SIZE_PX = 88;

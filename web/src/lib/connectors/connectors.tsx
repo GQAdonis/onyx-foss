@@ -2,6 +2,7 @@ import * as Yup from "yup";
 import { ConfigurableSources, ValidInputTypes, ValidSources } from "../types";
 import { AccessTypeGroupSelectorFormType } from "@/components/admin/connectors/AccessTypeGroupSelector";
 import { Credential } from "@/lib/connectors/credentials"; // Import Credential type
+import { DOCS_ADMINS_PATH } from "@/lib/constants";
 
 export function isLoadState(connector_name: string): boolean {
   // TODO: centralize connector metadata like this somewhere instead of hardcoding it here
@@ -791,7 +792,7 @@ export const connectorConfigs: Record<
                   "\n    }" +
                   "\n  }" +
                   "\n}" +
-                  "\n\n[See our docs](https://docs.onyx.app/admin/connectors/official/salesforce) for more details.",
+                  `\n\n[See our docs](${DOCS_ADMINS_PATH}/connectors/official/salesforce) for more details.`,
               },
             ],
           },
@@ -813,6 +814,7 @@ export const connectorConfigs: Record<
         description: `• If no sites are specified, all sites in your organization will be indexed (Sites.Read.All permission required).
 • Specifying 'https://onyxai.sharepoint.com/sites/support' for example only indexes this site.
 • Specifying 'https://onyxai.sharepoint.com/sites/support/subfolder' for example only indexes this folder.
+• Specifying sites currently works for SharePoint instances using English, Spanish, or German. Contact the Onyx team if you need another language supported.
 `,
       },
     ],
@@ -1000,6 +1002,11 @@ For example, specifying .*-support.* as a "channel" will cause the connector to 
         optional: false,
       },
     ],
+    advanced_values: [],
+  },
+  coda: {
+    description: "Configure Coda connector",
+    values: [],
     advanced_values: [],
   },
   notion: {
@@ -1830,6 +1837,10 @@ export interface FileConfig {
 export interface ZulipConfig {
   realm_name: string;
   realm_url: string;
+}
+
+export interface CodaConfig {
+  workspace_id?: string;
 }
 
 export interface NotionConfig {

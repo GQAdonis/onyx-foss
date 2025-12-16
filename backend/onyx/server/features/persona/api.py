@@ -33,12 +33,12 @@ from onyx.db.persona import get_persona_snapshots_for_user
 from onyx.db.persona import get_persona_snapshots_paginated
 from onyx.db.persona import mark_persona_as_deleted
 from onyx.db.persona import mark_persona_as_not_deleted
-from onyx.db.persona import update_all_personas_display_priority
 from onyx.db.persona import update_persona_is_default
 from onyx.db.persona import update_persona_label
 from onyx.db.persona import update_persona_public_status
 from onyx.db.persona import update_persona_shared_users
 from onyx.db.persona import update_persona_visibility
+from onyx.db.persona import update_personas_display_priority
 from onyx.file_store.file_store import get_default_file_store
 from onyx.file_store.models import ChatFileType
 from onyx.secondary_llm_flows.starter_message_creation import (
@@ -155,16 +155,22 @@ def patch_persona_default_status(
         raise HTTPException(status_code=403, detail=str(e))
 
 
-@admin_router.put("/display-priority")
-def patch_persona_display_priority(
+@admin_agents_router.patch("/display-priorities")
+def patch_agents_display_priorities(
     display_priority_request: DisplayPriorityRequest,
-    _: User | None = Depends(current_admin_user),
+    user: User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> None:
-    update_all_personas_display_priority(
-        display_priority_map=display_priority_request.display_priority_map,
-        db_session=db_session,
-    )
+    try:
+        update_personas_display_priority(
+            display_priority_map=display_priority_request.display_priority_map,
+            db_session=db_session,
+            user=user,
+            commit_db_txn=True,
+        )
+    except ValueError as e:
+        logger.exception("Failed to update agent display priorities.")
+        raise HTTPException(status_code=403, detail=str(e))
 
 
 @admin_router.get("")
@@ -194,6 +200,9 @@ def get_agents_admin_paginated(
     get_editable: bool = Query(
         False, description="If true, only returns editable personas."
     ),
+    include_default: bool = Query(
+        True, description="If true, includes builtin/default personas."
+    ),
 ) -> PaginatedReturn[PersonaSnapshot]:
     """Paginated endpoint for listing agents (formerly personas) (admin view).
 
@@ -206,6 +215,7 @@ def get_agents_admin_paginated(
         page_num=page_num,
         page_size=page_size,
         get_editable=get_editable,
+        include_default=include_default,
         include_deleted=include_deleted,
     )
 
@@ -213,6 +223,7 @@ def get_agents_admin_paginated(
         user=user,
         db_session=db_session,
         get_editable=get_editable,
+        include_default=include_default,
         include_deleted=include_deleted,
     )
 
@@ -435,6 +446,9 @@ def get_agents_paginated(
     get_editable: bool = Query(
         False, description="If true, only returns editable personas."
     ),
+    include_default: bool = Query(
+        True, description="If true, includes builtin/default personas."
+    ),
 ) -> PaginatedReturn[MinimalPersonaSnapshot]:
     """Paginated endpoint for listing agents available to the user.
 
@@ -450,6 +464,7 @@ def get_agents_paginated(
         page_num=page_num,
         page_size=page_size,
         get_editable=get_editable,
+        include_default=include_default,
         include_deleted=include_deleted,
     )
 
@@ -457,6 +472,7 @@ def get_agents_paginated(
         user=user,
         db_session=db_session,
         get_editable=get_editable,
+        include_default=include_default,
         include_deleted=include_deleted,
     )
 

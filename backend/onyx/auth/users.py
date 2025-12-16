@@ -56,6 +56,7 @@ from httpx_oauth.oauth2 import OAuth2Token
 from pydantic import BaseModel
 from sqlalchemy import nulls_last
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from onyx.auth.api_key import get_hashed_api_key_from_request
@@ -218,7 +219,7 @@ def verify_email_is_invited(email: str) -> None:
         raise PermissionError("Email must be specified")
 
     try:
-        email_info = validate_email(email)
+        email_info = validate_email(email, check_deliverability=False)
     except EmailUndeliverableError:
         raise PermissionError("Email is not valid")
 
@@ -226,7 +227,9 @@ def verify_email_is_invited(email: str) -> None:
         try:
             # normalized emails are now being inserted into the db
             # we can remove this normalization on read after some time has passed
-            email_info_whitelist = validate_email(email_whitelist)
+            email_info_whitelist = validate_email(
+                email_whitelist, check_deliverability=False
+            )
         except EmailNotValidError:
             continue
 
@@ -339,6 +342,39 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
                         user_create, safe=safe, request=request
                     )  # type: ignore
                     user_created = True
+                except IntegrityError as error:
+                    # Race condition: another request created the same user after the
+                    # pre-insert existence check but before our commit.
+                    await self.user_db.session.rollback()
+                    logger.warning(
+                        "IntegrityError while creating user %s, assuming duplicate: %s",
+                        user_create.email,
+                        str(error),
+                    )
+                    try:
+                        user = await self.get_by_email(user_create.email)
+                    except exceptions.UserNotExists:
+                        # Unexpected integrity error, surface it for handling upstream.
+                        raise error
+
+                    if MULTI_TENANT:
+                        user_by_session = await db_session.get(User, user.id)
+                        if user_by_session:
+                            user = user_by_session
+
+                    if (
+                        user.role.is_web_login()
+                        or not isinstance(user_create, UserCreate)
+                        or not user_create.role.is_web_login()
+                    ):
+                        raise exceptions.UserAlreadyExists()
+
+                    user_update = UserUpdateWithRole(
+                        password=user_create.password,
+                        is_verified=user_create.is_verified,
+                        role=user_create.role,
+                    )
+                    user = await self.update(user_update, user)
                 except exceptions.UserAlreadyExists:
                     user = await self.get_by_email(user_create.email)
 
@@ -1240,22 +1276,19 @@ async def optional_user(
     async_db_session: AsyncSession = Depends(get_async_session),
     user: User | None = Depends(optional_fastapi_current_user),
 ) -> User | None:
-    user = await _check_for_saml_and_jwt(request, user, async_db_session)
 
-    # check if a PAT is present (before API key)
-    if user is None:
-        hashed_pat = get_hashed_pat_from_request(request)
-        if hashed_pat:
+    if user := await _check_for_saml_and_jwt(request, user, async_db_session):
+        # If user is already set, _check_for_saml_and_jwt returns the same user object
+        return user
+
+    try:
+        if hashed_pat := get_hashed_pat_from_request(request):
             user = await fetch_user_for_pat(hashed_pat, async_db_session)
-
-    # check if an API key is present
-    if user is None:
-        try:
-            hashed_api_key = get_hashed_api_key_from_request(request)
-        except ValueError:
-            hashed_api_key = None
-        if hashed_api_key:
+        elif hashed_api_key := get_hashed_api_key_from_request(request):
             user = await fetch_user_for_api_key(hashed_api_key, async_db_session)
+    except ValueError:
+        logger.warning("Issue with validating authentication token")
+        return None
 
     return user
 
@@ -1584,24 +1617,3 @@ def get_oauth_router(
         return redirect_response
 
     return router
-
-
-async def api_key_dep(
-    request: Request, async_db_session: AsyncSession = Depends(get_async_session)
-) -> User | None:
-    if AUTH_TYPE == AuthType.DISABLED:
-        return None
-
-    user: User | None = None
-
-    hashed_api_key = get_hashed_api_key_from_request(request)
-    if not hashed_api_key:
-        raise HTTPException(status_code=401, detail="Missing API key")
-
-    if hashed_api_key:
-        user = await fetch_user_for_api_key(hashed_api_key, async_db_session)
-
-    if user is None:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-    return user
