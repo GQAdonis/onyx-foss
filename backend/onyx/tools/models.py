@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from typing import Literal
 from uuid import UUID
@@ -14,8 +15,13 @@ from onyx.configs.chat_configs import NUM_RETURNED_HITS
 from onyx.configs.constants import MessageType
 from onyx.context.search.models import SearchDoc
 from onyx.context.search.models import SearchDocsResponse
+from onyx.server.query_and_chat.placement import Placement
 from onyx.server.query_and_chat.streaming_models import GeneratedImage
 from onyx.tools.tool_implementations.images.models import FinalImageGenerationResponse
+
+
+TOOL_CALL_MSG_FUNC_NAME = "function_name"
+TOOL_CALL_MSG_ARGUMENTS = "arguments"
 
 
 class CustomToolUserFileSnapshot(BaseModel):
@@ -26,6 +32,22 @@ class CustomToolCallSummary(BaseModel):
     tool_name: str
     response_type: str  # e.g., 'json', 'image', 'csv', 'graph'
     tool_result: Any  # The response data
+
+
+class ToolCallKickoff(BaseModel):
+    tool_call_id: str
+    tool_name: str
+    tool_args: dict[str, Any]
+
+    placement: Placement
+
+    def to_msg_str(self) -> str:
+        return json.dumps(
+            {
+                TOOL_CALL_MSG_FUNC_NAME: self.tool_name,
+                TOOL_CALL_MSG_ARGUMENTS: self.tool_args,
+            }
+        )
 
 
 class ToolResponse(BaseModel):
@@ -44,12 +66,8 @@ class ToolResponse(BaseModel):
     )
     # This is the final string that needs to be wrapped in a tool call response message and concatenated to the history
     llm_facing_response: str
-
-
-class ToolCallKickoff(BaseModel):
-    tool_call_id: str
-    tool_name: str
-    tool_args: dict[str, Any]
+    # The original tool call that triggered this response - set by tool_runner
+    tool_call: ToolCallKickoff | None = None
 
 
 class ToolRunnerResponse(BaseModel):
@@ -158,8 +176,12 @@ class CustomToolRunContext(BaseModel):
 
 
 class ToolCallInfo(BaseModel):
-    parent_tool_call_id: str | None  # None if attached to the Chat Message directly
+    # The parent_tool_call_id is the actual generated tool call id
+    # It is NOT the DB ID which often does not exist yet when the ToolCallInfo is created
+    # None if attached to the Chat Message directly
+    parent_tool_call_id: str | None
     turn_index: int
+    tab_index: int
     tool_name: str
     tool_call_id: str
     tool_id: int

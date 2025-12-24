@@ -44,16 +44,16 @@ import {
   AirtableIcon,
   GitbookIcon,
   HighspotIcon,
+  DrupalWikiIcon,
   EmailIcon,
   TestRailIcon,
 } from "@/components/icons/icons";
 import { ValidSources } from "./types";
 import { SourceCategory, SourceMetadata } from "./search/interfaces";
 import { Persona } from "@/app/admin/assistants/interfaces";
-import SvgGlobe from "@/icons/globe";
 import React from "react";
-import SvgFileText from "@/icons/file-text";
 import { DOCS_ADMINS_PATH } from "./constants";
+import { SvgFileText, SvgGlobe } from "@opal/icons";
 
 interface PartialSourceMetadata {
   icon: React.FC<{ size?: number; className?: string }>;
@@ -300,6 +300,12 @@ export const SOURCE_METADATA_MAP: SourceMap = {
     displayName: "Gmail",
     category: SourceCategory.Messaging,
     docs: `${DOCS_ADMINS_PATH}/connectors/official/gmail/overview`,
+  },
+  drupal_wiki: {
+    icon: DrupalWikiIcon,
+    displayName: "Drupal Wiki",
+    category: SourceCategory.Wiki,
+    docs: `${DOCS_ADMINS_PATH}/connectors/official/drupal_wiki`,
   },
   imap: {
     icon: EmailIcon,

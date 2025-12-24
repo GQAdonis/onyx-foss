@@ -9,6 +9,7 @@ import {
 import { StreamStopInfo } from "@/lib/search/interfaces";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Route } from "next";
 import { usePostHog } from "posthog-js/react";
 import { stopChatSession } from "../chat_search/utils";
 import {
@@ -80,7 +81,7 @@ export interface OnSubmitProps {
   currentMessageFiles: ProjectFile[];
   // from the chat bar???
 
-  useAgentSearch: boolean;
+  deepResearch: boolean;
 
   // optional params
   messageIdToResend?: number;
@@ -89,7 +90,6 @@ export interface OnSubmitProps {
   isSeededChat?: boolean;
   modelOverride?: LlmDescriptor;
   regenerationRequest?: RegenerationRequest | null;
-  overrideFileDescriptors?: FileDescriptor[];
 }
 
 interface RegenerationRequest {
@@ -237,7 +237,7 @@ export function useChatController({
 
     // Navigate immediately if still on chat page
     if (pathname === "/chat" && !navigatingAway.current) {
-      router.push(newUrl, { scroll: false });
+      router.push(newUrl as Route, { scroll: false });
     }
 
     // Refresh sidebar so chat appears (will show as "New Chat" initially)
@@ -350,10 +350,10 @@ export function useChatController({
         if (!hasStop) {
           const maxTurnIndex =
             packets.length > 0
-              ? Math.max(...packets.map((p) => p.turn_index))
+              ? Math.max(...packets.map((p) => p.placement.turn_index))
               : 0;
           const stopPacket: Packet = {
-            turn_index: maxTurnIndex + 1,
+            placement: { turn_index: maxTurnIndex + 1 },
             obj: { type: PacketType.STOP },
           } as Packet;
 
@@ -375,14 +375,13 @@ export function useChatController({
     async ({
       message,
       currentMessageFiles,
-      useAgentSearch,
+      deepResearch,
       messageIdToResend,
       queryOverride,
       forceSearch,
       isSeededChat,
       modelOverride,
       regenerationRequest,
-      overrideFileDescriptors,
     }: OnSubmitProps) => {
       const projectId = params(SEARCH_PARAM_NAMES.PROJECT_ID);
       {
@@ -392,7 +391,7 @@ export function useChatController({
           const newUrl = params.toString()
             ? `${pathname}?${params.toString()}`
             : pathname;
-          router.replace(newUrl, { scroll: false });
+          router.replace(newUrl as Route, { scroll: false });
         }
       }
 
@@ -627,6 +626,9 @@ export function useChatController({
       let aiMessageImages: FileDescriptor[] | null = null;
       let error: string | null = null;
       let stackTrace: string | null = null;
+      let errorCode: string | null = null;
+      let isRetryable: boolean = true;
+      let errorDetails: Record<string, any> | null = null;
 
       let finalMessage: BackendMessage | null = null;
       let toolCall: ToolCallMetadata | null = null;
@@ -649,7 +651,7 @@ export function useChatController({
           signal: controller.signal,
           message: currMessage,
           alternateAssistantId: liveAssistant?.id,
-          fileDescriptors: overrideFileDescriptors,
+          fileDescriptors: projectFilesToFileDescriptors(currentMessageFiles),
           parentMessageId: (() => {
             const parentId =
               regenerationRequest?.parentMessage.messageId ||
@@ -692,7 +694,7 @@ export function useChatController({
           systemPromptOverride:
             searchParams?.get(SEARCH_PARAM_NAMES.SYSTEM_PROMPT) || undefined,
           useExistingUserMessage: isSeededChat,
-          useAgentSearch,
+          deepResearch,
           enabledToolIds:
             disabledToolIds && liveAssistant
               ? liveAssistant.tools
@@ -758,14 +760,18 @@ export function useChatController({
               Object.hasOwn(packet, "error") &&
               (packet as any).error != null
             ) {
-              setUncaughtError(
-                frozenSessionId,
-                (packet as StreamingError).error
-              );
+              const streamingError = packet as StreamingError;
+              error = streamingError.error;
+              stackTrace = streamingError.stack_trace || null;
+              errorCode = streamingError.error_code || null;
+              isRetryable = streamingError.is_retryable ?? true;
+              errorDetails = streamingError.details || null;
+
+              setUncaughtError(frozenSessionId, streamingError.error);
               updateChatStateAction(frozenSessionId, "input");
               updateSubmittedMessage(getCurrentSessionId(), "");
 
-              throw new Error((packet as StreamingError).error);
+              throw new Error(streamingError.error);
             } else if (Object.hasOwn(packet, "message_id")) {
               finalMessage = packet as BackendMessage;
             } else if (Object.hasOwn(packet, "stop_reason")) {
@@ -868,6 +874,10 @@ export function useChatController({
               toolCall: null,
               parentNodeId: initialUserNode.nodeId,
               packets: [],
+              stackTrace: stackTrace,
+              errorCode: errorCode,
+              isRetryable: isRetryable,
+              errorDetails: errorDetails,
             },
           ],
           completeMessageTreeOverride: currentMessageTreeLocal,

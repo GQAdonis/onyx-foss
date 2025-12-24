@@ -3,9 +3,10 @@
 import React from "react";
 import Text from "@/refresh-components/texts/Text";
 import { cn } from "@/lib/utils";
-import { IconProps } from "@/icons";
+import type { IconProps } from "@opal/types";
 import Truncated from "@/refresh-components/texts/Truncated";
 import Link from "next/link";
+import type { Route } from "next";
 
 const buttonClassNames = {
   main: {
@@ -168,7 +169,7 @@ const LineItem = React.forwardRef<HTMLButtonElement, LineItemProps>(
     );
 
     if (!href) return content;
-    return <Link href={href}>{content}</Link>;
+    return <Link href={href as Route}>{content}</Link>;
   }
 );
 LineItem.displayName = "LineItem";

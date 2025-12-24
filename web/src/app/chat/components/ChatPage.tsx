@@ -10,11 +10,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePopup } from "@/components/admin/connectors/Popup";
 import { SEARCH_PARAM_NAMES } from "@/app/chat/services/searchParams";
 import { useFederatedConnectors, useFilters, useLlmManager } from "@/lib/hooks";
+import { useForcedTools } from "@/lib/hooks/useForcedTools";
 import OnyxInitializingLoader from "@/components/OnyxInitializingLoader";
 import { OnyxDocument, MinimalOnyxDocument } from "@/lib/search/interfaces";
 import { useSettingsContext } from "@/components/settings/SettingsProvider";
 import Dropzone from "react-dropzone";
-import ChatInputBar from "@/app/chat/components/input/ChatInputBar";
+import ChatInputBar, {
+  ChatInputBarHandle,
+} from "@/app/chat/components/input/ChatInputBar";
 import useChatSessions from "@/hooks/useChatSessions";
 import { useCCPairs } from "@/lib/hooks/useCCPairs";
 import { useTags } from "@/lib/hooks/useTags";
@@ -27,13 +30,12 @@ import { useUser } from "@/components/user/UserProvider";
 import NoAssistantModal from "@/components/modals/NoAssistantModal";
 import TextView from "@/components/chat/TextView";
 import Modal from "@/refresh-components/Modal";
-import SvgFileText from "@/icons/file-text";
 import { useSendMessageToParent } from "@/lib/extension/utils";
 import { SUBMIT_MESSAGE_TYPES } from "@/lib/extension/constants";
 import { getSourceMetadata } from "@/lib/sources";
 import { SourceMetadata } from "@/lib/search/interfaces";
 import { FederatedConnectorDetail, UserRole, ValidSources } from "@/lib/types";
-import { DocumentResults } from "@/app/chat/components/documentSidebar/DocumentResults";
+import DocumentsSidebar from "@/sections/document-sidebar/DocumentsSidebar";
 import { useChatController } from "@/app/chat/hooks/useChatController";
 import { useAssistantController } from "@/app/chat/hooks/useAssistantController";
 import { useChatSessionController } from "@/app/chat/hooks/useChatSessionController";
@@ -41,7 +43,7 @@ import { useDeepResearchToggle } from "@/app/chat/hooks/useDeepResearchToggle";
 import { useIsDefaultAgent } from "@/app/chat/hooks/useIsDefaultAgent";
 import {
   useChatSessionStore,
-  useChatPageLayout,
+  useCurrentMessageHistory,
 } from "@/app/chat/stores/useChatSessionStore";
 import {
   useCurrentChatState,
@@ -63,18 +65,16 @@ import Suggestions from "@/sections/Suggestions";
 import OnboardingFlow from "@/refresh-components/onboarding/OnboardingFlow";
 import { useOnboardingState } from "@/refresh-components/onboarding/useOnboardingState";
 import { OnboardingStep } from "@/refresh-components/onboarding/types";
-import AppPageLayout from "@/layouts/AppPageLayout";
-import { HeaderData } from "@/lib/headers/fetchHeaderDataSS";
+import * as AppLayouts from "@/layouts/app-layouts";
+import { SvgFileText } from "@opal/icons";
 import Spacer from "@/refresh-components/Spacer";
+import { DEFAULT_CONTEXT_TOKENS } from "@/lib/constants";
 
-const DEFAULT_CONTEXT_TOKENS = 120_000;
-
-interface ChatPageProps {
+export interface ChatPageProps {
   firstMessage?: string;
-  headerData: HeaderData;
 }
 
-export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
+export default function ChatPage({ firstMessage }: ChatPageProps) {
   // Performance tracking
   // Keeping this here in case we need to track down slow renders in the future
   // const renderCount = useRef(0);
@@ -109,6 +109,12 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
     lastFailedFiles,
     clearLastFailedFiles,
   } = useProjectsContext();
+
+  // When changing from project chat to main chat (or vice-versa), clear forced tools
+  const { setForcedToolIds } = useForcedTools();
+  useEffect(() => {
+    setForcedToolIds([]);
+  }, [currentProjectId, setForcedToolIds]);
 
   // handle redirect if chat page is disabled
   // NOTE: this must be done here, in a client component since
@@ -145,7 +151,7 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
       onSubmit({
         message,
         currentMessageFiles,
-        useAgentSearch: deepResearchEnabled,
+        deepResearch: deepResearchEnabled,
       });
     }
   }
@@ -248,11 +254,8 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
     }
   }, [lastFailedFiles, setPopup, clearLastFailedFiles]);
 
-  const [message, setMessage] = useState(
-    searchParams?.get(SEARCH_PARAM_NAMES.USER_PROMPT) || ""
-  );
-
   const [projectPanelVisible, setProjectPanelVisible] = useState(true);
+  const chatInputBarRef = useRef<ChatInputBarHandle>(null);
 
   const filterManager = useFilters();
 
@@ -264,37 +267,22 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
   });
 
   const chatUiRef = useRef<ChatUIHandle>(null);
-  const inputRef = useRef<HTMLDivElement>(null);
+  const autoScrollEnabled = user?.preferences?.auto_scroll ?? false;
 
-  const previousHeight = useRef<number>(
-    inputRef.current?.getBoundingClientRect().height!
+  // Handle input bar height changes for scroll adjustment
+  const handleInputHeightChange = useCallback(
+    (delta: number) => {
+      if (autoScrollEnabled && delta > 0) {
+        chatUiRef.current?.scrollBy(delta);
+      }
+    },
+    [autoScrollEnabled]
   );
 
-  function handleInputResize() {
-    setTimeout(() => {
-      if (inputRef.current) {
-        const newHeight: number =
-          inputRef.current?.getBoundingClientRect().height!;
-        const heightDifference = newHeight - previousHeight.current;
-        if (previousHeight.current && heightDifference != 0) {
-          if (autoScrollEnabled) {
-            chatUiRef.current?.scrollBy(Math.max(heightDifference, 0));
-          }
-        }
-        previousHeight.current = newHeight;
-      }
-    }, 100);
-  }
-
-  useEffect(handleInputResize, [message]);
-
   const resetInputBar = useCallback(() => {
-    setMessage("");
+    chatInputBarRef.current?.reset();
     setCurrentMessageFiles([]);
-  }, [setMessage, setCurrentMessageFiles]);
-
-  // handle re-sizing of the text area
-  const textAreaRef = useRef<HTMLTextAreaElement>(null);
+  }, [setCurrentMessageFiles]);
 
   // Add refs needed by useChatSessionController
   const chatSessionIdRef = useRef<string | null>(currentChatSessionId);
@@ -338,7 +326,7 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
   const updateCurrentDocumentSidebarVisible = useChatSessionStore(
     (state) => state.updateCurrentDocumentSidebarVisible
   );
-  const { messageHistory } = useChatPageLayout();
+  const messageHistory = useCurrentMessageHistory();
 
   const { onSubmit, stopGenerating, handleMessageSpecificFileUpload } =
     useChatController({
@@ -365,14 +353,12 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
       setCurrentMessageFiles,
       chatSessionIdRef,
       loadedIdSessionRef,
-      textAreaRef,
+      chatInputBarRef,
       isInitialLoad,
       submitOnLoadPerformed,
       refreshChatSessions,
       onSubmit,
     });
-
-  const autoScrollEnabled = user?.preferences?.auto_scroll ?? false;
 
   useSendMessageToParent();
 
@@ -400,7 +386,7 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
     string | null
   >(null);
 
-  function handleResubmitLastMessage() {
+  const handleResubmitLastMessage = useCallback(() => {
     // Grab the last user-type message
     const lastUserMsg = messageHistory
       .slice()
@@ -418,10 +404,16 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
     onSubmit({
       message: lastUserMsg.message,
       currentMessageFiles: currentMessageFiles,
-      useAgentSearch: deepResearchEnabled,
+      deepResearch: deepResearchEnabled,
       messageIdToResend: lastUserMsg.messageId,
     });
-  }
+  }, [
+    messageHistory,
+    setPopup,
+    onSubmit,
+    currentMessageFiles,
+    deepResearchEnabled,
+  ]);
 
   const toggleDocumentSidebar = useCallback(() => {
     if (!documentSidebarVisible) {
@@ -435,16 +427,19 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
     redirect("/auth/login");
   }
 
-  const handleChatInputSubmit = useCallback(() => {
-    onSubmit({
-      message: message,
-      currentMessageFiles: currentMessageFiles,
-      useAgentSearch: deepResearchEnabled,
-    });
-    setShowOnboarding(false);
-  }, [message, onSubmit, currentMessageFiles, deepResearchEnabled]);
+  const handleChatInputSubmit = useCallback(
+    (message: string) => {
+      onSubmit({
+        message,
+        currentMessageFiles: currentMessageFiles,
+        deepResearch: deepResearchEnabled,
+      });
+      setShowOnboarding(false);
+    },
+    [onSubmit, currentMessageFiles, deepResearchEnabled]
+  );
 
-  // Memoized callbacks for DocumentResults
+  // Memoized callbacks for DocumentsSidebar
   const handleMobileDocumentSidebarClose = useCallback(() => {
     updateCurrentDocumentSidebarVisible(false);
   }, [updateCurrentDocumentSidebarVisible]);
@@ -462,7 +457,7 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
         )}
       >
         <div className="h-full w-[25rem]">
-          <DocumentResults
+          <DocumentsSidebar
             setPresentingDocument={setPresentingDocument}
             modal={false}
             closeSidebar={handleDesktopDocumentSidebarClose}
@@ -586,7 +581,7 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
                 {/* IMPORTANT: this is a memoized component, and it's very important
                 for performance reasons that this stays true. MAKE SURE that all function
                 props are wrapped in useCallback. */}
-                <DocumentResults
+                <DocumentsSidebar
                   setPresentingDocument={setPresentingDocument}
                   modal
                   closeSidebar={handleMobileDocumentSidebarClose}
@@ -614,10 +609,7 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
 
       <FederatedOAuthModal />
 
-      <AppPageLayout
-        settings={headerData.settings}
-        chatSession={headerData.chatSession}
-      >
+      <AppLayouts.Root>
         <Dropzone
           onDrop={(acceptedFiles) =>
             handleMessageSpecificFileUpload(acceptedFiles)
@@ -626,8 +618,8 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
         >
           {({ getRootProps }) => (
             <div
-              className="h-full w-full flex flex-col items-center"
-              {...getRootProps()}
+              className="h-full w-full flex flex-col items-center outline-none"
+              {...getRootProps({ tabIndex: -1 })}
             >
               {/* ProjectUI */}
               {!!currentProjectId && projectPanelVisible && (
@@ -664,10 +656,7 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
               )}
 
               {/* ChatInputBar container */}
-              <div
-                ref={inputRef}
-                className="max-w-[50rem] w-full pointer-events-auto flex flex-col justify-center items-center"
-              >
+              <div className="max-w-[50rem] w-full pointer-events-auto z-sticky flex flex-col px-4 lg:px-0 justify-center items-center">
                 {(showOnboarding ||
                   (user?.role !== UserRole.ADMIN &&
                     !user?.personalization?.name)) &&
@@ -681,6 +670,7 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
                   )}
 
                 <ChatInputBar
+                  ref={chatInputBarRef}
                   deepResearchEnabled={deepResearchEnabled}
                   toggleDeepResearch={toggleDeepResearch}
                   toggleDocumentSidebar={toggleDocumentSidebar}
@@ -689,10 +679,12 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
                   removeDocs={() => setSelectedDocuments([])}
                   retrievalEnabled={retrievalEnabled}
                   selectedDocuments={selectedDocuments}
-                  message={message}
-                  setMessage={setMessage}
+                  initialMessage={
+                    searchParams?.get(SEARCH_PARAM_NAMES.USER_PROMPT) || ""
+                  }
                   stopGenerating={stopGenerating}
                   onSubmit={handleChatInputSubmit}
+                  onHeightChange={handleInputHeightChange}
                   chatState={currentChatState}
                   currentSessionFileTokenCount={
                     currentChatSessionId
@@ -702,7 +694,6 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
                   availableContextTokens={availableContextTokens}
                   selectedAssistant={selectedAssistant || liveAssistant}
                   handleFileUpload={handleMessageSpecificFileUpload}
-                  textAreaRef={textAreaRef}
                   setPresentingDocument={setPresentingDocument}
                   disabled={
                     (!llmManager.isLoadingProviders &&
@@ -734,7 +725,7 @@ export default function ChatPage({ firstMessage, headerData }: ChatPageProps) {
             </div>
           )}
         </Dropzone>
-      </AppPageLayout>
+      </AppLayouts.Root>
 
       {desktopDocumentSidebar}
     </>

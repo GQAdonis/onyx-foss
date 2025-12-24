@@ -11,7 +11,7 @@ import { useAdminPersonas } from "@/hooks/useAdminPersonas";
 import { Persona } from "./interfaces";
 import { ThreeDotsLoader } from "@/components/Loading";
 import { ErrorCallout } from "@/components/ErrorCallout";
-import SvgOnyxOctagon from "@/icons/onyx-octagon";
+import { SvgOnyxOctagon } from "@opal/icons";
 import { useState, useEffect } from "react";
 import Pagination from "@/refresh-components/Pagination";
 
@@ -139,7 +139,7 @@ export default function Page() {
   });
 
   return (
-    <div className="mx-auto container">
+    <div className="container">
       <AdminPageTitle icon={SvgOnyxOctagon} title="Assistants" />
 
       {isLoading && <ThreeDotsLoader />}
